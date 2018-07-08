@@ -263,7 +263,7 @@ func TestParam(t *testing.T) {
 	httpmock.RegisterStubRequest(
 		httpmock.NewStubRequest(
 			"GET",
-			"http://localhost:8080/v1/raspiBackup/param/:param",
+			"http://localhost:8080/v1/raspiBackup/param/1",
 			func(req *http.Request) (*http.Response, error) {
 				t.Logf("MOCKED REQUEST served: %s", req.URL)
 				resp, err := httpmock.NewJSONResponse(200, nil)
@@ -272,14 +272,15 @@ func TestParam(t *testing.T) {
 				}
 				return resp, nil
 			},
-		))
+		),
+	)
 
 	// SETUP test
 	performer := NewPerformerFactory(t)
 
 	// CALL endpoint
 	var b []byte
-	w, body, err := performer.PerformRequest(t, "GET", "/v1/raspiBackup/param/:param", bytes.NewBuffer(b))
+	w, body, err := performer.PerformRequest(t, "GET", "/v1/raspiBackup/param/1", bytes.NewBuffer(b))
 	require.NoError(t, err, "GET failed")
 
 	// DECODE response
