@@ -37,7 +37,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/jarcoal/httpmock.v1"
+	"github.com/thingful/httpmock"
 )
 
 // Performer - executes a http request and returns the response
@@ -200,21 +200,23 @@ func TestMock(t *testing.T) {
 	defer os.Setenv("HOST", oldHost)
 
 	httpmock.Activate()
-	httpmock.RegisterNoResponder(httpmock.InitialTransport.RoundTrip) // non mocked urls are passed through
 	defer httpmock.DeactivateAndReset()
 
 	rsp := ExecutionResponse{Output: "Done"}
 
-	httpmock.RegisterResponder("POST", "/v1/raspiBackup",
-		func(req *http.Request) (*http.Response, error) {
-			t.Logf("MOCKED REQUEST served")
-			resp, err := httpmock.NewJsonResponse(200, rsp)
-			if err != nil {
-				return httpmock.NewJsonResponse(500, ErrorResponse{Message: "Failure", Output: "???"})
-			}
-			return resp, nil
-		},
-	)
+	httpmock.RegisterStubRequest(
+		httpmock.NewStubRequest(
+			"POST",
+			"http://localhost:8080/v1/raspiBackup",
+			func(req *http.Request) (*http.Response, error) {
+				t.Logf("MOCKED REQUEST served")
+				resp, err := httpmock.NewJSONResponse(200, rsp)
+				if err != nil {
+					return httpmock.NewJSONResponse(500, ErrorResponse{Message: "Failure", Output: "???"})
+				}
+				return resp, nil
+			},
+		))
 
 	// SETUP test
 	performer := NewPerformerFactory(t)
@@ -255,19 +257,22 @@ func TestParam(t *testing.T) {
 	defer os.Setenv("HOST", oldHost)
 
 	httpmock.Activate()
-	httpmock.RegisterNoResponder(httpmock.InitialTransport.RoundTrip) // non mocked urls are passed through
+	//httpmock.RegisterNoResponder(httpmock.InitialTransport.RoundTrip) // non mocked urls are passed through
 	defer httpmock.DeactivateAndReset()
 
-	httpmock.RegisterResponder("GET", "/v1/raspiBackup/param/:param",
-		func(req *http.Request) (*http.Response, error) {
-			t.Logf("MOCKED REQUEST served: %s", req.URL)
-			resp, err := httpmock.NewJsonResponse(200, nil)
-			if err != nil {
-				return httpmock.NewJsonResponse(500, ErrorResponse{Message: "Failure", Output: "???"})
-			}
-			return resp, nil
-		},
-	)
+	httpmock.RegisterStubRequest(
+		httpmock.NewStubRequest(
+			"GET",
+			"http://localhost:8080/v1/raspiBackup/param/:param",
+			func(req *http.Request) (*http.Response, error) {
+				t.Logf("MOCKED REQUEST served: %s", req.URL)
+				resp, err := httpmock.NewJSONResponse(200, nil)
+				if err != nil {
+					return httpmock.NewJSONResponse(500, ErrorResponse{Message: "Failure", Output: "???"})
+				}
+				return resp, nil
+			},
+		))
 
 	// SETUP test
 	performer := NewPerformerFactory(t)
