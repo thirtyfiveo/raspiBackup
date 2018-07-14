@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-07-04 19:52:41 +0200$"
+GIT_DATE="$Date: 2018-07-14 16:09:25 +0200$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: 0cb26d6$"
+GIT_COMMIT="$Sha1: f223b2c$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -681,8 +681,8 @@ MSG_SAVING_USED_PARTITIONS_ONLY=141
 MSG_EN[$MSG_SAVING_USED_PARTITIONS_ONLY]="RBK0141I: Saving space of defined partitions only."
 MSG_DE[$MSG_SAVING_USED_PARTITIONS_ONLY]="RBK0141I: Nur der von den definierten Partitionen belegte Speicherplatz wird gesichert."
 MSG_NO_BOOTDEVICE_FOUND=142
-MSG_EN[$MSG_NO_BOOTDEVICE_FOUND]="RBK0142E: Unable to detect boot device."
-MSG_DE[$MSG_NO_BOOTDEVICE_FOUND]="RBK0142E: Bootgerät kann nicht erkannt werden."
+MSG_EN[$MSG_NO_BOOTDEVICE_FOUND]="RBK0142E: Unable to detect boot device or directory."
+MSG_DE[$MSG_NO_BOOTDEVICE_FOUND]="RBK0142E: Bootgerät oder -verzeichnis kann nicht erkannt werden."
 MSG_FORCE_SFDISK=143
 MSG_EN[$MSG_FORCE_SFDISK]="RBK0143W: Target %1 does not match with backup. Partitioning forced."
 MSG_DE[$MSG_FORCE_SFDISK]="RBK0143W: Ziel %1 passt nicht zu dem Backup. Partitionierung wird trotzdem vorgenommen."
@@ -875,9 +875,9 @@ MSG_DE[$MSG_MISSING_RESTOREDEVICE_OPTION]="RBK0199E: Option -r benötigt auch Op
 MSG_SHARED_BOOT_DEVICE=200
 MSG_EN[$MSG_SHARED_BOOT_DEVICE]="RBK0200I: /boot and root located on same device %1."
 MSG_DE[$MSG_SHARED_BOOT_DEVICE]="RBK0200I: /boot und root befinden sich auf demselben Gerät %1."
-MSG_SHARED_BOOT_DEVICE_NOT_SUPPORTED=201
-MSG_EN[$MSG_SHARED_BOOT_DEVICE_NOT_SUPPORTED]="RBK0201E: /boot and root located on same device not supported with backuptype %1. Use dd"
-MSG_DE[$MSG_SHARED_BOOT_DEVICE_NOT_SUPPORTED]="RBK0201E: /boot und root auf demselben Gerät sind nicht unterstützt bei dem Backuptyp %1. Benutze dd"
+MSG_NO_BOOTPARTITION_RESTORED=201
+MSG_EN[$MSG_NO_BOOTPARTITION_RESTORED]="RBK0201W: No bootpartition restored. Located on root partition."
+MSG_DE[$MSG_NO_BOOTPARTITION_RESTORED]="RBK0201W: Keine Bootpartition wiederhergestellt. Sie liegt auf der Rootpartition."
 
 declare -A MSG_HEADER=( ['I']="---" ['W']="!!!" ['E']="???" )
 
@@ -1498,6 +1498,7 @@ function bootedFromSD() {
 function getPartitionPrefix() { # device
 
 	logEntry "getPartitionPrefix: $1"
+
 	if [[ $1 =~ ^(mmcblk|loop|sd[a-z]) ]]; then
 		local pref="$1"
 		[[ $1 =~ ^(mmcblk|loop) ]] && pref="${1}p"
@@ -2716,11 +2717,12 @@ function bootPartitionBackup() {
 
 		local p rc
 
-		logItem "Starting boot partition backup..."
+		if (( ! $FAKE && ! $EXCLUDE_DD && ! $SHARED_BOOT_DIRECTORY )); then
 
-		writeToConsole $MSG_LEVEL_MINIMAL $MSG_BACKUP_CREATING_PARTITION_INFO
+			logItem "Starting boot partition backup..."
 
-		if (( ! $FAKE && ! $EXCLUDE_DD )); then
+			writeToConsole $MSG_LEVEL_MINIMAL $MSG_BACKUP_CREATING_PARTITION_INFO
+
 			local ext=$BOOT_DD_EXT
 			(( $TAR_BOOT_PARTITION_ENABLED )) && ext=$BOOT_TAR_EXT
 			if  [[ ! -e "$BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.$ext" ]]; then
@@ -2792,9 +2794,12 @@ function bootPartitionBackup() {
 				logItem "Found existing backup of master boot record $BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.mbr ..."
 				writeToConsole $MSG_LEVEL_DETAILED $MSG_EXISTING_MBR_BACKUP "$BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.mbr"
 			fi
-		fi
 
-		logItem "Finished boot partition backup..."
+			logItem "Finished boot partition backup..."
+
+		else
+			logitem "No boot patrition backup created"
+		fi
 
 		logExit  "bootPartitionBackup"
 
@@ -3269,20 +3274,9 @@ function restore() {
 
 			fi
 
-			if [[ -e $TAR_FILE ]]; then
-				writeToConsole $MSG_LEVEL_DETAILED $MSG_FORMATTING_FIRST_PARTITION "$BOOT_PARTITION"
-				mkfs.vfat $BOOT_PARTITION &>>$LOG_FILE
-				rc=$?
-				if [ $rc != 0 ]; then
-					writeToConsole $MSG_LEVEL_MINIMAL $MSG_IMG_BOOT_CREATE_PARTITION_FAILED "$rc"
-					exitError $RC_NATIVE_RESTORE_FAILED
-				fi
-			fi
-
-			writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_FIRST_PARTITION "$BOOT_PARTITION"
-
 			local ext=$BOOT_DD_EXT
 			if [[ -e "$DD_FILE" ]]; then
+				writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_FIRST_PARTITION "$BOOT_PARTITION"
 				logItem "Restoring boot partition from $DD_FILE"
 				if (( $PROGRESS )); then
 					dd if="$DD_FILE" 2>> $LOG_FILE | pv -fs $(stat -c %s "$DD_FILE") | dd of=$BOOT_PARTITION bs=1M &>>"$LOG_FILE"
@@ -3290,7 +3284,17 @@ function restore() {
 					dd if="$DD_FILE" of=$BOOT_PARTITION bs=1M &>>"$LOG_FILE"
 				fi
 				rc=$?
-			else
+			elif [[ -e "$TAR_FILE" ]]; then
+
+				writeToConsole $MSG_LEVEL_DETAILED $MSG_FORMATTING_FIRST_PARTITION "$BOOT_PARTITION"
+				mkfs.vfat $BOOT_PARTITION &>>$LOG_FILE
+				rc=$?
+				if [ $rc != 0 ]; then
+					writeToConsole $MSG_LEVEL_MINIMAL $MSG_IMG_BOOT_CREATE_PARTITION_FAILED "$rc"
+					exitError $RC_NATIVE_RESTORE_FAILED
+				fi
+
+				writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_FIRST_PARTITION "$BOOT_PARTITION"
 				ext=$BOOT_TAR_EXT
 				logItem "Restoring boot partition from $TAR_FILE to $BOOT_PARTITION"
 				mount $BOOT_PARTITION "$MNT_POINT/boot"
@@ -3303,6 +3307,10 @@ function restore() {
 				executeCommand "$cmd"
 				rc=$?
 				popd &>>"$LOG_FILE"
+
+			else
+				writeToConsole $MSG_LEVEL_MINIMAL $MSG_NO_BOOTPARTITION_RESTORED
+				rc=0
 			fi
 
 			if [ $rc != 0 ]; then
@@ -3864,39 +3872,70 @@ function getRootPartition() {
 
 }
 
+# retrieve various information for a partition, e.g. /dev/mmcblk0p1 or /dev/sda2
+#
+# 1: device (mmcblk0 or sda)
+# 2: partition number (1 or 2)
+#
+
+function deviceInfo() { # device, e.g. /dev/mmcblk1p2 or /dev/sda3, returns 0:device (mmcblk0), 1: partition number
+
+	logEntry "deviceInfo: $1"
+	local r=""
+
+	if [[ $1 =~ ^/dev/([^0-9]+)([0-9]+)$ || $1 =~ ^/dev/([^0-9]+[0-9]+)p([0-9]+)$ ]]; then
+		r="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+	fi
+
+	logExit "deviceInfo: $r"
+}
+
 function inspect4Backup() {
 
 	logEntry "inspect4Backup"
 
-	logItem "ls /dev/mmcblk*:${NL}$(ls -1 /dev/mmcblk* 2>/dev/null)"
-	logItem "ls /dev/sd*:${NL}$(ls -1 /dev/sd* 2>/dev/null)"
-	logItem "mountpoint /boot: $(mountpoint -d /boot) mountpoint /: $(mountpoint -d /)"
-
 	if (( $REGRESSION_TEST || $RESTORE )); then
 		BOOT_DEVICE="mmcblk0"
 	else
-		part=$(for d in $(find /dev -type b); do [ "$(mountpoint -d /boot)" = "$(mountpoint -x $d)" ] && echo $d && break; done)
-		logItem "part: $part"
-		local bootDeviceNumber=$(mountpoint -d /boot)
-		local rootDeviceNumber=$(mountpoint -d /)
-		logItem "bootDeviceNumber: $bootDeviceNumber"
-		logItem "rootDeviceNumber: $rootDeviceNumber"
-		if [ "$bootDeviceNumber" == "$rootDeviceNumber" ]; then	# /boot on same partition with root partition /
-			local rootDevice=$(for file in $(find /sys/dev/ -name $rootDeviceNumber); do source ${file}/uevent; echo $DEVNAME; done) # mmcblk0p1
-			logItem "Rootdevice: $rootDevice"
-			writeToConsole $MSG_LEVEL_MINIMAL $MSG_SHARED_BOOT_DEVICE "$rootDevice"
-			SHARED_BOOT_DIRECTORY=1
-			BOOT_DEVICE=${rootDevice/p*/} # mmcblk0
+		# test whether boot device is mounted
+		local bootPartition=$(findmnt /boot -o source -n) # /dev/mmcblk0p1, /dev/loop01p or /dev/sda1
+		logItem "/boot mounted? $bootPartition"
 
-			if [[ $BACKUPTYPE != $BACKUPTYPE_DD  && $BACKUPTYPE != $BACKUPTYPE_DDZ ]]; then
-				writeToConsole $MSG_LEVEL_MINIMAL $MSG_SHARED_BOOT_DEVICE_NOT_SUPPORTED  "$BACKUPTYPE"
-				exitError $RC_PARAMETER_ERROR
-			fi
-		elif [[ "$part" =~ /dev/(sd[a-z]) || "$part" =~ /dev/(mmcblk[0-9])p ]]; then
-			BOOT_DEVICE=${BASH_REMATCH[1]}
-		else
+		# test whether some other /boot path is mounted
+		if [[ -z $bootPartition ]]; then
+			bootPartition=$(mount | grep "/boot" | cut -f 1 -d ' ')
+			logItem "Some path in /boot mounted? $bootPartition"
+		fi
+
+		# find root partition
+		local rootPartition=$(findmnt / -o source -n) # /dev/root or /dev/sda1
+		logItem "/ mounted? $rootPartition"
+		if [[ $rootPartition == "/dev/root" ]]; then
+			local rp=$(grep -E -o "root=[^ ]+" /proc/cmdline)
+			rootPartition=${rp#/root=/}
+			logItem "/ mounted as /dev/root: $rootPartition"
+		fi
+
+		# check for /boot on root partition
+		if ! find /boot cmdline.txt; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_NO_BOOTDEVICE_FOUND
 			exitError $RC_MISC_ERROR
+		else
+			bootPartition="$rootPartition"
+		fi
+
+		boot=( $(deviceInfo "$bootPartition") )
+		root=( $(deviceInfo "$rootPartition") )
+
+		logItem "boot: ${boot[@]}"
+		logItem "root: ${root[@]}"
+
+		BOOT_DEVICE="${boot[0]}"
+		local rootDevice="${root[0]}"
+
+		if [[ "$BOOT_DEVICE" == "$rootDevice" ]]; then
+			writeToConsole $MSG_LEVEL_MINIMAL $MSG_SHARED_BOOT_DEVICE "$rootDevice"
+			SHARED_BOOT_DIRECTORY=1
 		fi
 	fi
 
@@ -4215,10 +4254,10 @@ function checkAndSetBootPartitionFiles() { # directory extension
 		else
 			logItem "$(<"$SF_FILE")"
 		fi
-		if [[ ! -e "$DD_FILE" && ! -e "$TAR_FILE" ]]; then
-			logItem "$DD_FILE/$TAR_FILE not found"
-			(( errorCnt++ ))
-		fi
+		#if [[ ! -e "$DD_FILE" && ! -e "$TAR_FILE" ]]; then
+		#	logItem "$DD_FILE/$TAR_FILE not found"
+		#	(( errorCnt++ ))
+		#fi
 		if [[ ! -e "$MBR_FILE" ]]; then
 			logItem "$MBR_FILE not found"
 			(( errorCnt++ ))
