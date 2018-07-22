@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-07-14 16:09:25 +0200$"
+GIT_DATE="$Date: 2018-07-21 22:30:15 +0200$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: f223b2c$"
+GIT_COMMIT="$Sha1: 68542b2$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -3898,17 +3898,19 @@ function inspect4Backup() {
 		BOOT_DEVICE="mmcblk0"
 	else
 		# test whether boot device is mounted
-		local bootPartition=$(findmnt /boot -o source -n) # /dev/mmcblk0p1, /dev/loop01p or /dev/sda1
-		logItem "/boot mounted? $bootPartition"
+		local bootMountpoint="/boot"
+		local bootPartition=$(findmnt $bootMountpoint -o source -n) # /dev/mmcblk0p1, /dev/loop01p or /dev/sda1
+		logItem "$bootMountpoint mounted? $bootPartition"
 
 		# test whether some other /boot path is mounted
 		if [[ -z $bootPartition ]]; then
 			bootPartition=$(mount | grep "/boot" | cut -f 1 -d ' ')
-			logItem "Some path in /boot mounted? $bootPartition"
+			bootMountpoint=$(mount | grep "/boot" | cut -f 3 -d ' ')
+			logItem "Some path in /boot mounted? $bootPartition on $bootMountpoint"
 		fi
 
 		# find root partition
-		local rootPartition=$(findmnt / -o source -n) # /dev/root or /dev/sda1
+		local rootPartition=$(findmnt / -o source -n) # /dev/root or /dev/sda1 or /dev/mmcblk1p1
 		logItem "/ mounted? $rootPartition"
 		if [[ $rootPartition == "/dev/root" ]]; then
 			local rp=$(grep -E -o "root=[^ ]+" /proc/cmdline)
@@ -3917,11 +3919,14 @@ function inspect4Backup() {
 		fi
 
 		# check for /boot on root partition
-		if ! find /boot cmdline.txt; then
-			writeToConsole $MSG_LEVEL_MINIMAL $MSG_NO_BOOTDEVICE_FOUND
-			exitError $RC_MISC_ERROR
-		else
-			bootPartition="$rootPartition"
+		if [[ -z "$bootPartition" ]]; then
+			if ! find $bootMountpoint -name cmdline.txt; then
+				writeToConsole $MSG_LEVEL_MINIMAL $MSG_NO_BOOTDEVICE_FOUND
+				exitError $RC_MISC_ERROR
+			else
+				bootPartition="$rootPartition"
+				logItem "Bootpartition is located on rootpartition $bootPartition"
+			fi
 		fi
 
 		boot=( $(deviceInfo "$bootPartition") )
