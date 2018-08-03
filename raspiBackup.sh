@@ -31,7 +31,7 @@ if [ ! -n "$BASH" ] ;then
    exit 127
 fi
 
-VERSION="0.6.4-beta"	# -beta, -hotfix or -dev suffixes allowed
+VERSION="0.6.4"	# -beta, -hotfix or -dev suffixes allowed
 
 # add pathes if not already set (usually not set in crontab)
 
@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-07-21 22:30:15 +0200$"
+GIT_DATE="$Date: 2018-08-03 22:59:32 +0200$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: 68542b2$"
+GIT_COMMIT="$Sha1: d97cd4c$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -85,7 +85,10 @@ PROPERTY_URL="$MYHOMEURL/downloads/raspibackup0613-properties/download"
 VERSION_URL_EN="$MYHOMEURL/en/versionhistory"
 VERSION_URL_DE="$MYHOMEURL/de/versionshistorie"
 LATEST_TEMP_PROPERTY_FILE="/tmp/$MYNAME.properties"
+LOCAL_SHARE_DIRECTORY="/usr/local/share/$MYNAME"
+RESTORE_REMINDER_FILE="$MYNAME.reminder"
 VARS_FILE="/tmp/$MYNAME.vars"
+TEMPORARY_MOUNTPOINT_ROOT="/tmp"
 DOWNLOAD_TIMEOUT=60 # seconds
 DOWNLOAD_RETRIES=3
 
@@ -192,7 +195,6 @@ SUPPORTED_EMAIL_PROGRAM_REGEX="^($EMAIL_MAILX_PROGRAM|$EMAIL_SSMTP_PROGRAM|$EMAI
 SUPPORTED_MAIL_PROGRAMS=$(echo $SUPPORTED_EMAIL_PROGRAM_REGEX | sed 's:^..\(.*\)..$:\1:' | sed 's/|/,/g')
 
 PARTITIONS_TO_BACKUP_ALL="*"
-TEMPORARY_MOUNTPOINT_ROOT="/tmp"
 
 NEWS_AVAILABLE=0
 BETA_AVAILABLE=0
@@ -681,8 +683,8 @@ MSG_SAVING_USED_PARTITIONS_ONLY=141
 MSG_EN[$MSG_SAVING_USED_PARTITIONS_ONLY]="RBK0141I: Saving space of defined partitions only."
 MSG_DE[$MSG_SAVING_USED_PARTITIONS_ONLY]="RBK0141I: Nur der von den definierten Partitionen belegte Speicherplatz wird gesichert."
 MSG_NO_BOOTDEVICE_FOUND=142
-MSG_EN[$MSG_NO_BOOTDEVICE_FOUND]="RBK0142E: Unable to detect boot device or directory."
-MSG_DE[$MSG_NO_BOOTDEVICE_FOUND]="RBK0142E: Bootgerät oder -verzeichnis kann nicht erkannt werden."
+MSG_EN[$MSG_NO_BOOTDEVICE_FOUND]="RBK0142E: Unable to detect boot device."
+MSG_DE[$MSG_NO_BOOTDEVICE_FOUND]="RBK0142E: Bootgerät kann nicht erkannt werden."
 MSG_FORCE_SFDISK=143
 MSG_EN[$MSG_FORCE_SFDISK]="RBK0143W: Target %1 does not match with backup. Partitioning forced."
 MSG_DE[$MSG_FORCE_SFDISK]="RBK0143W: Ziel %1 passt nicht zu dem Backup. Partitionierung wird trotzdem vorgenommen."
@@ -875,9 +877,9 @@ MSG_DE[$MSG_MISSING_RESTOREDEVICE_OPTION]="RBK0199E: Option -r benötigt auch Op
 MSG_SHARED_BOOT_DEVICE=200
 MSG_EN[$MSG_SHARED_BOOT_DEVICE]="RBK0200I: /boot and root located on same device %1."
 MSG_DE[$MSG_SHARED_BOOT_DEVICE]="RBK0200I: /boot und root befinden sich auf demselben Gerät %1."
-MSG_NO_BOOTPARTITION_RESTORED=201
-MSG_EN[$MSG_NO_BOOTPARTITION_RESTORED]="RBK0201W: No bootpartition restored. Located on root partition."
-MSG_DE[$MSG_NO_BOOTPARTITION_RESTORED]="RBK0201W: Keine Bootpartition wiederhergestellt. Sie liegt auf der Rootpartition."
+MSG_SHARED_BOOT_DEVICE_NOT_SUPPORTED=201
+MSG_EN[$MSG_SHARED_BOOT_DEVICE_NOT_SUPPORTED]="RBK0201E: /boot and root located on same device not supported with backuptype %1. Use dd"
+MSG_DE[$MSG_SHARED_BOOT_DEVICE_NOT_SUPPORTED]="RBK0201E: /boot und root auf demselben Gerät sind nicht unterstützt bei dem Backuptyp %1. Benutze dd"
 
 declare -A MSG_HEADER=( ['I']="---" ['W']="!!!" ['E']="???" )
 
@@ -1270,7 +1272,7 @@ function logOptions() {
 	logItem "BACKUPTYPE=$BACKUPTYPE"
 	logItem "CHECK_FOR_BAD_BLOCKS=$CHECK_FOR_BAD_BLOCKS"
  	logItem "CONFIG_FILE=$CONFIG_FILE"
- 	logItem "DD_BACKUP_SAVE_USED_PARTITIONS_ONLY=$DEFAULT_DD_BACKUP_SAVE_USED_PARTITIONS_ONLY"
+ 	logItem "DD_BACKUP_SAVE_USED_PARTITIONS_ONLY=$DD_BACKUP_SAVE_USED_PARTITIONS_ONLY"
  	logItem "DD_BLOCKSIZE=$DD_BLOCKSIZE"
  	logItem "DD_PARMS=$DD_PARMS"
 	logItem "DEFAULT_DEPLOYMENT_HOSTS=$DEFAULT_DEPLOYMENT_HOSTS"
@@ -1294,6 +1296,8 @@ function logOptions() {
 	logItem "PARTITIONS_TO_BACKUP=$PARTITIONS_TO_BACKUP"
 	logItem "RESIZE_ROOTFS=$RESIZE_ROOTFS"
 	logItem "RESTORE_DEVICE=$RESTORE_DEVICE"
+	logItem "RESTORE_REMINDER_INTERVAL=$RESTORE_REMINDER_INTERVAL"
+	logItem "RESTORE_REMINDER_REPEAT=$RESTORE_REMINDER_REPEAT"
 	logItem "ROOT_PARTITION=$ROOT_PARTITION"
 	logItem "RSYNC_BACKUP_ADDITIONAL_OPTIONS=$RSYNC_BACKUP_ADDITIONAL_OPTIONS"
 	logItem "RSYNC_BACKUP_OPTIONS=$RSYNC_BACKUP_OPTIONS"
@@ -1416,6 +1420,11 @@ DEFAULT_TIMESTAMPS=0
 # add system status in debug log (Attention: may expose sensible information)
 DEFAULT_SYSTEMSTATUS=0
 
+# reminder to test restore (unit: months)
+DEFAULT_RESTORE_REMINDER_INTERVAL=6
+# Number of repeats of reminder
+DEFAULT_RESTORE_REMINDER_REPEAT=3
+
 ############# End default config section #############
 
 # nice function to get user who invoked this script via sudo
@@ -1498,7 +1507,6 @@ function bootedFromSD() {
 function getPartitionPrefix() { # device
 
 	logEntry "getPartitionPrefix: $1"
-
 	if [[ $1 =~ ^(mmcblk|loop|sd[a-z]) ]]; then
 		local pref="$1"
 		[[ $1 =~ ^(mmcblk|loop) ]] && pref="${1}p"
@@ -2256,7 +2264,6 @@ function sendEMail() { # content subject
 
 		if (( $NOTIFY_UPDATE && $NEWS_AVAILABLE )); then
 			local smiley=";-)"
-			(( $BETA_AVAILABLE )) && smiley="8-)"
 			subject="$smiley $subject"
 			local c1=$(getLocalizedMessage $MSG_NEW_VERSION_AVAILABLE "$newVersion" "$oldVersion")
 			local c2=$(getLocalizedMessage $MSG_VISIT_VERSION_HISTORY_PAGE "$(getLocalizedMessage $MSG_VERSION_HISTORY_PAGE)")
@@ -2717,12 +2724,11 @@ function bootPartitionBackup() {
 
 		local p rc
 
-		if (( ! $FAKE && ! $EXCLUDE_DD && ! $SHARED_BOOT_DIRECTORY )); then
+		logItem "Starting boot partition backup..."
 
-			logItem "Starting boot partition backup..."
+		writeToConsole $MSG_LEVEL_MINIMAL $MSG_BACKUP_CREATING_PARTITION_INFO
 
-			writeToConsole $MSG_LEVEL_MINIMAL $MSG_BACKUP_CREATING_PARTITION_INFO
-
+		if (( ! $FAKE && ! $EXCLUDE_DD )); then
 			local ext=$BOOT_DD_EXT
 			(( $TAR_BOOT_PARTITION_ENABLED )) && ext=$BOOT_TAR_EXT
 			if  [[ ! -e "$BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.$ext" ]]; then
@@ -2794,12 +2800,9 @@ function bootPartitionBackup() {
 				logItem "Found existing backup of master boot record $BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.mbr ..."
 				writeToConsole $MSG_LEVEL_DETAILED $MSG_EXISTING_MBR_BACKUP "$BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.mbr"
 			fi
-
-			logItem "Finished boot partition backup..."
-
-		else
-			logitem "No boot patrition backup created"
 		fi
+
+		logItem "Finished boot partition backup..."
 
 		logExit  "bootPartitionBackup"
 
@@ -3274,18 +3277,7 @@ function restore() {
 
 			fi
 
-			local ext=$BOOT_DD_EXT
-			if [[ -e "$DD_FILE" ]]; then
-				writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_FIRST_PARTITION "$BOOT_PARTITION"
-				logItem "Restoring boot partition from $DD_FILE"
-				if (( $PROGRESS )); then
-					dd if="$DD_FILE" 2>> $LOG_FILE | pv -fs $(stat -c %s "$DD_FILE") | dd of=$BOOT_PARTITION bs=1M &>>"$LOG_FILE"
-				else
-					dd if="$DD_FILE" of=$BOOT_PARTITION bs=1M &>>"$LOG_FILE"
-				fi
-				rc=$?
-			elif [[ -e "$TAR_FILE" ]]; then
-
+			if [[ -e $TAR_FILE ]]; then
 				writeToConsole $MSG_LEVEL_DETAILED $MSG_FORMATTING_FIRST_PARTITION "$BOOT_PARTITION"
 				mkfs.vfat $BOOT_PARTITION &>>$LOG_FILE
 				rc=$?
@@ -3293,8 +3285,20 @@ function restore() {
 					writeToConsole $MSG_LEVEL_MINIMAL $MSG_IMG_BOOT_CREATE_PARTITION_FAILED "$rc"
 					exitError $RC_NATIVE_RESTORE_FAILED
 				fi
+			fi
 
-				writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_FIRST_PARTITION "$BOOT_PARTITION"
+			writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_FIRST_PARTITION "$BOOT_PARTITION"
+
+			local ext=$BOOT_DD_EXT
+			if [[ -e "$DD_FILE" ]]; then
+				logItem "Restoring boot partition from $DD_FILE"
+				if (( $PROGRESS )); then
+					dd if="$DD_FILE" 2>> $LOG_FILE | pv -fs $(stat -c %s "$DD_FILE") | dd of=$BOOT_PARTITION bs=1M &>>"$LOG_FILE"
+				else
+					dd if="$DD_FILE" of=$BOOT_PARTITION bs=1M &>>"$LOG_FILE"
+				fi
+				rc=$?
+			else
 				ext=$BOOT_TAR_EXT
 				logItem "Restoring boot partition from $TAR_FILE to $BOOT_PARTITION"
 				mount $BOOT_PARTITION "$MNT_POINT/boot"
@@ -3307,10 +3311,6 @@ function restore() {
 				executeCommand "$cmd"
 				rc=$?
 				popd &>>"$LOG_FILE"
-
-			else
-				writeToConsole $MSG_LEVEL_MINIMAL $MSG_NO_BOOTPARTITION_RESTORED
-				rc=0
 			fi
 
 			if [ $rc != 0 ]; then
@@ -3872,75 +3872,39 @@ function getRootPartition() {
 
 }
 
-# retrieve various information for a partition, e.g. /dev/mmcblk0p1 or /dev/sda2
-#
-# 1: device (mmcblk0 or sda)
-# 2: partition number (1 or 2)
-#
-
-function deviceInfo() { # device, e.g. /dev/mmcblk1p2 or /dev/sda3, returns 0:device (mmcblk0), 1: partition number
-
-	logEntry "deviceInfo: $1"
-	local r=""
-
-	if [[ $1 =~ ^/dev/([^0-9]+)([0-9]+)$ || $1 =~ ^/dev/([^0-9]+[0-9]+)p([0-9]+)$ ]]; then
-		r="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
-	fi
-
-	logExit "deviceInfo: $r"
-}
-
 function inspect4Backup() {
 
 	logEntry "inspect4Backup"
 
+	logItem "ls /dev/mmcblk*:${NL}$(ls -1 /dev/mmcblk* 2>/dev/null)"
+	logItem "ls /dev/sd*:${NL}$(ls -1 /dev/sd* 2>/dev/null)"
+	logItem "mountpoint /boot: $(mountpoint -d /boot) mountpoint /: $(mountpoint -d /)"
+
 	if (( $REGRESSION_TEST || $RESTORE )); then
 		BOOT_DEVICE="mmcblk0"
 	else
-		# test whether boot device is mounted
-		local bootMountpoint="/boot"
-		local bootPartition=$(findmnt $bootMountpoint -o source -n) # /dev/mmcblk0p1, /dev/loop01p or /dev/sda1
-		logItem "$bootMountpoint mounted? $bootPartition"
-
-		# test whether some other /boot path is mounted
-		if [[ -z $bootPartition ]]; then
-			bootPartition=$(mount | grep "/boot" | cut -f 1 -d ' ')
-			bootMountpoint=$(mount | grep "/boot" | cut -f 3 -d ' ')
-			logItem "Some path in /boot mounted? $bootPartition on $bootMountpoint"
-		fi
-
-		# find root partition
-		local rootPartition=$(findmnt / -o source -n) # /dev/root or /dev/sda1 or /dev/mmcblk1p1
-		logItem "/ mounted? $rootPartition"
-		if [[ $rootPartition == "/dev/root" ]]; then
-			local rp=$(grep -E -o "root=[^ ]+" /proc/cmdline)
-			rootPartition=${rp#/root=/}
-			logItem "/ mounted as /dev/root: $rootPartition"
-		fi
-
-		# check for /boot on root partition
-		if [[ -z "$bootPartition" ]]; then
-			if ! find $bootMountpoint -name cmdline.txt; then
-				writeToConsole $MSG_LEVEL_MINIMAL $MSG_NO_BOOTDEVICE_FOUND
-				exitError $RC_MISC_ERROR
-			else
-				bootPartition="$rootPartition"
-				logItem "Bootpartition is located on rootpartition $bootPartition"
-			fi
-		fi
-
-		boot=( $(deviceInfo "$bootPartition") )
-		root=( $(deviceInfo "$rootPartition") )
-
-		logItem "boot: ${boot[@]}"
-		logItem "root: ${root[@]}"
-
-		BOOT_DEVICE="${boot[0]}"
-		local rootDevice="${root[0]}"
-
-		if [[ "$BOOT_DEVICE" == "$rootDevice" ]]; then
+		part=$(for d in $(find /dev -type b); do [ "$(mountpoint -d /boot)" = "$(mountpoint -x $d)" ] && echo $d && break; done)
+		logItem "part: $part"
+		local bootDeviceNumber=$(mountpoint -d /boot)
+		local rootDeviceNumber=$(mountpoint -d /)
+		logItem "bootDeviceNumber: $bootDeviceNumber"
+		logItem "rootDeviceNumber: $rootDeviceNumber"
+		if [ "$bootDeviceNumber" == "$rootDeviceNumber" ]; then	# /boot on same partition with root partition /
+			local rootDevice=$(for file in $(find /sys/dev/ -name $rootDeviceNumber); do source ${file}/uevent; echo $DEVNAME; done) # mmcblk0p1
+			logItem "Rootdevice: $rootDevice"
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_SHARED_BOOT_DEVICE "$rootDevice"
 			SHARED_BOOT_DIRECTORY=1
+			BOOT_DEVICE=${rootDevice/p*/} # mmcblk0
+
+			if [[ $BACKUPTYPE != $BACKUPTYPE_DD  && $BACKUPTYPE != $BACKUPTYPE_DDZ ]]; then
+				writeToConsole $MSG_LEVEL_MINIMAL $MSG_SHARED_BOOT_DEVICE_NOT_SUPPORTED  "$BACKUPTYPE"
+				exitError $RC_PARAMETER_ERROR
+			fi
+		elif [[ "$part" =~ /dev/(sd[a-z]) || "$part" =~ /dev/(mmcblk[0-9])p ]]; then
+			BOOT_DEVICE=${BASH_REMATCH[1]}
+		else
+			writeToConsole $MSG_LEVEL_MINIMAL $MSG_NO_BOOTDEVICE_FOUND
+			exitError $RC_MISC_ERROR
 		fi
 	fi
 
@@ -4259,10 +4223,10 @@ function checkAndSetBootPartitionFiles() { # directory extension
 		else
 			logItem "$(<"$SF_FILE")"
 		fi
-		#if [[ ! -e "$DD_FILE" && ! -e "$TAR_FILE" ]]; then
-		#	logItem "$DD_FILE/$TAR_FILE not found"
-		#	(( errorCnt++ ))
-		#fi
+		if [[ ! -e "$DD_FILE" && ! -e "$TAR_FILE" ]]; then
+			logItem "$DD_FILE/$TAR_FILE not found"
+			(( errorCnt++ ))
+		fi
 		if [[ ! -e "$MBR_FILE" ]]; then
 			logItem "$MBR_FILE not found"
 			(( errorCnt++ ))
@@ -5053,6 +5017,53 @@ function doitRestore() {
 
 }
 
+# calculate diff in months of two dates (yyyymm)
+function calculateMonthDiff() { # fromDate toDate
+
+	local y1=${1:0:4}
+	local m1=${1:4:2}
+
+	local y2=${2:0:4}
+	local m2=${2:4:2}
+
+	local diff=$(( ($y2 - $y1) * 12 + ($m2 - $m1) ))
+	echo $diff
+}
+
+function updateRestoreReminder() {
+
+	local reminder_file="$LOCAL_SHARE_DIRECTORY/$RESTORE_REMINDER_FILE"
+
+	# create directory to save state
+	if [[ ! -d "$LOCAL_SHARE_DIRECTORY" ]]; then
+		mkdir -p "$LOCAL_SHARE_DIRECTORY"
+	fi
+
+	# initialize reminder state
+	if [[ ! -e "$reminder_file" ]]; then
+		 echo "$(date +%Y%m) 0" > "$reminder_file"
+		 return
+	fi
+
+	# retrieve reminder state
+	local now=$(date +%Y%m)
+	local rf=( $(<$reminder_file) )
+	local diffMonths=$(calculateMonthDiff $now ${rf[0]} )
+
+	# check if reminder should be send
+	if (( $diffMonths >= $RESTORE_REMINDER_INTERVAL )); then
+		if (( ${rf[1]} < $RESTORE_REMINDER_REPEAT )); then
+			# update reminder state
+			local nr=$(( ${rf[1]} + 1 ))
+			echo "${rf[0]} $nr" > "$reminder_file"
+			NEWS_AVAILABLE=1
+		else
+			# reset reminder state
+			echo "$(date +%Y%m) 0" > "$reminder_file"
+		fi
+	fi
+}
+
 function remount() { # device mountpoint
 
 	if ( isMounted "$1" ); then
@@ -5357,6 +5368,8 @@ PARTITIONBASED_BACKUP=$DEFAULT_PARTITIONBASED_BACKUP
 PARTITIONS_TO_BACKUP="$DEFAULT_PARTITIONS_TO_BACKUP"
 RESIZE_ROOTFS=$DEFAULT_RESIZE_ROOTFS
 RESTORE_DEVICE=$DEFAULT_RESTORE_DEVICE
+RESTORE_REMINDER_INTERVAL=$DEFAULT_RESTORE_REMINDER_INTERVAL
+RESTORE_REMINDER_REPEAT=$DEFAULT_RESTORE_REMINDER_REPEAT
 RSYNC_BACKUP_ADDITIONAL_OPTIONS="$DEFAULT_RSYNC_BACKUP_ADDITIONAL_OPTIONS"
 RSYNC_BACKUP_OPTIONS="$DEFAULT_RSYNC_BACKUP_OPTIONS"
 SENDER_EMAIL="$DEFAULT_SENDER_EMAIL"
@@ -5791,6 +5804,11 @@ downloadPropertiesFile
 if isVersionDeprecated "$VERSION"; then
 	writeToConsole $MSG_LEVEL_MINIMAL $MSG_SCRIPT_UPDATE_DEPRECATED "$VERSION"
 	updateScript "RESTART"
+fi
+
+updateRestoreReminder
+if (( $RESTORE_REMINDER )); then
+	writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORE_REMINDER "$RESTORE_REMINDER_INTERVAL"
 fi
 
 doit #	no return for backup
