@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-09-13 21:50:41 +0200$"
+GIT_DATE="$Date: 2018-09-18 20:06:56 +0200$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: 32e3016$"
+GIT_COMMIT="$Sha1: 4862cdc$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -425,15 +425,15 @@ MSG_DE[$MSG_RESTORING_MBR]="RBK0051I: Master boot backup wird von %s auf %s zur�
 MSG_CREATING_PARTITIONS=52
 MSG_EN[$MSG_CREATING_PARTITIONS]="RBK0052I: Creating partition(s) on %s."
 MSG_DE[$MSG_CREATING_PARTITIONS]="RBK0052I: Partition(en) werden auf %s erstellt."
-MSG_RESTORING_FIRST_PARTITION=53
-MSG_EN[$MSG_RESTORING_FIRST_PARTITION]="RBK0053I: Restoring first partition (boot partition) to %s."
-MSG_DE[$MSG_RESTORING_FIRST_PARTITION]="RBK0053I: Erste Partition (Bootpartition) wird auf %s zur체ckgespielt."
+MSG_RESTORING_BOOT_PARTITION=53
+MSG_EN[$MSG_RESTORING_BOOT_PARTITION]="RBK0053I: Restoring boot partition to %s."
+MSG_DE[$MSG_RESTORING_BOOT_PARTITION]="RBK0053I: Bootpartition wird auf %s zur체ckgespielt."
 MSG_FORMATTING_SECOND_PARTITION=54
-MSG_EN[$MSG_FORMATTING_SECOND_PARTITION]="RBK0054I: Formating second partition (root partition) %s."
-MSG_DE[$MSG_FORMATTING_SECOND_PARTITION]="RBK0054I: Zweite Partition (Rootpartition) %s wird formatiert."
-MSG_RESTORING_SECOND_PARTITION=55
-MSG_EN[$MSG_RESTORING_SECOND_PARTITION]="RBK0055I: Restoring second partition (root partition) to %s."
-MSG_DE[$MSG_RESTORING_SECOND_PARTITION]="RBK0055I: Zweite Partition (Rootpartition) wird auf %s zur체ckgespielt."
+MSG_EN[$MSG_FORMATTING_SECOND_PARTITION]="RBK0054I: Formating root partition %s."
+MSG_DE[$MSG_FORMATTING_SECOND_PARTITION]="RBK0054I: Rootpartition %s wird formatiert."
+MSG_RESTORING_ROOT_PARTITION=55
+MSG_EN[$MSG_RESTORING_ROOT_PARTITION]="RBK0055I: Restoring root partition to %s."
+MSG_DE[$MSG_RESTORING_ROOT_PARTITION]="RBK0055I: Rootpartition wird auf %s zur체ckgespielt."
 MSG_DEPLOYMENT_PARMS_ERROR=56
 MSG_EN[$MSG_DEPLOYMENT_PARMS_ERROR]="RBK0056E: Incorrect deployment parameters. Use <hostname>@<username>."
 MSG_DE[$MSG_DEPLOYMENT_PARMS_ERROR]="RBK0056E: Ung체ltige Deploymentparameter. Erforderliches Format: <hostname>@<username>."
@@ -2757,11 +2757,11 @@ function bootPartitionBackup() {
 
 		local p rc
 
-		logItem "Starting boot partition backup..."
-
-		writeToConsole $MSG_LEVEL_MINIMAL $MSG_BACKUP_CREATING_PARTITION_INFO
 
 		if (( ! $FAKE && ! $EXCLUDE_DD && ! $SHARED_BOOT_DIRECTORY )); then
+
+			logItem "Starting boot partition backup..."
+
 			local ext=$BOOT_DD_EXT
 			(( $TAR_BOOT_PARTITION_ENABLED )) && ext=$BOOT_TAR_EXT
 			if  [[ ! -e "$BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.$ext" ]]; then
@@ -2770,7 +2770,7 @@ function bootPartitionBackup() {
 					touch "$BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.$ext"
 				else
 					if (( $TAR_BOOT_PARTITION_ENABLED )); then
-						cmd="tar $TAR_BACKUP_OPTIONS -f \"$BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.$ext\" /boot &>>$LOG_FILE"
+						cmd="tar $TAR_BACKUP_OPTIONS -f \"$BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.$ext\" $bootMountpoint &>>$LOG_FILE"
 					else
 						cmd="dd if=/dev/${BOOT_PARTITION_PREFIX}1 of=\"$BACKUPTARGET_DIR/$BACKUPFILES_PARTITION_DATE.$ext\" bs=1M &>>$LOG_FILE"
 					fi
@@ -3310,6 +3310,7 @@ function restore() {
 
 			fi
 
+			rc=0
 			if [[ -e $TAR_FILE ]]; then
 				writeToConsole $MSG_LEVEL_DETAILED $MSG_FORMATTING_FIRST_PARTITION "$BOOT_PARTITION"
 				mkfs.vfat $BOOT_PARTITION &>>$LOG_FILE
@@ -3320,10 +3321,9 @@ function restore() {
 				fi
 			fi
 
-			writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_FIRST_PARTITION "$BOOT_PARTITION"
-
 			local ext=$BOOT_DD_EXT
 			if [[ -e "$DD_FILE" ]]; then
+				writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_BOOT_PARTITION "$BOOT_PARTITION"
 				logItem "Restoring boot partition from $DD_FILE"
 				if (( $PROGRESS )); then
 					dd if="$DD_FILE" 2>> $LOG_FILE | pv -fs $(stat -c %s "$DD_FILE") | dd of=$BOOT_PARTITION bs=1M &>>"$LOG_FILE"
@@ -3332,18 +3332,23 @@ function restore() {
 				fi
 				rc=$?
 			else
-				ext=$BOOT_TAR_EXT
-				logItem "Restoring boot partition from $TAR_FILE to $BOOT_PARTITION"
-				mount $BOOT_PARTITION "$MNT_POINT/boot"
-				pushd "$MNT_POINT" &>>"$LOG_FILE"
-				if (( $PROGRESS )); then
-					cmd="pv -f $TAR_FILE | tar -xf -"
+				if [[ -e $TAR_FILE ]]; then
+					writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_BOOT_PARTITION "$BOOT_PARTITION"
+					ext=$BOOT_TAR_EXT
+					logItem "Restoring boot partition from $TAR_FILE to $BOOT_PARTITION"
+					mount $BOOT_PARTITION "$MNT_POINT/boot"
+					pushd "$MNT_POINT" &>>"$LOG_FILE"
+					if (( $PROGRESS )); then
+						cmd="pv -f $TAR_FILE | tar -xf -"
+					else
+						cmd="tar -xf  \"$TAR_FILE\""
+					fi
+					executeCommand "$cmd"
+					rc=$?
+					popd &>>"$LOG_FILE"
 				else
-					cmd="tar -xf  \"$TAR_FILE\""
+					logitem "No bootpartition backup found to restore"
 				fi
-				executeCommand "$cmd"
-				rc=$?
-				popd &>>"$LOG_FILE"
 			fi
 
 			if [ $rc != 0 ]; then
@@ -3366,7 +3371,7 @@ function restore() {
 				exitError $RC_NATIVE_RESTORE_FAILED
 			fi
 
-			writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_SECOND_PARTITION "$ROOT_PARTITION"
+			writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORING_ROOT_PARTITION "$ROOT_PARTITION"
 			mount $ROOT_PARTITION "$MNT_POINT"
 
 			case $BACKUPTYPE in
@@ -3951,12 +3956,24 @@ function inspect4Backup() {
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_SHARED_BOOT_DEVICE "$rootDevice"
 			SHARED_BOOT_DIRECTORY=1
 			BOOT_DEVICE=${rootDevice/p*/} # mmcblk0
-#			if [[ $BACKUPTYPE != $BACKUPTYPE_DD  && $BACKUPTYPE != $BACKUPTYPE_DDZ ]]; then
-#				writeToConsole $MSG_LEVEL_MINIMAL $MSG_SHARED_BOOT_DEVICE_NOT_SUPPORTED  "$BACKUPTYPE"
-#				exitError $RC_PARAMETER_ERROR
-#			fi
+
+			bootPartition=$(mount | grep "/boot" | cut -f 1 -d ' ')
+			bootMountpoint=$(mount | grep "/boot" | cut -f 3 -d ' ')
+			logItem "$bootMountpoint mounted? $bootPartition"
+			local rp=$(grep -E -o "root=[^ ]+" /proc/cmdline)
+			rootPartition=${rp#/root=/}
+			logItem "/ mounted as /dev/root: $rootPartition"
+
 		elif [[ "$part" =~ /dev/(sd[a-z]) || "$part" =~ /dev/(mmcblk[0-9])p ]]; then
+
 			BOOT_DEVICE=${BASH_REMATCH[1]}
+			bootPartition=$(mount | grep "/boot" | cut -f 1 -d ' ')
+			bootMountpoint=$(mount | grep "/boot" | cut -f 3 -d ' ')
+			logItem "$bootMountpoint mounted? $bootPartition"
+			local rp=$(grep -E -o "root=[^ ]+" /proc/cmdline)
+			rootPartition=${rp#/root=/}
+			logItem "/ mounted as /dev/root: $rootPartition"
+
 		else
 
 			logItem "Starting alternate boot discovery"
@@ -4040,7 +4057,7 @@ function inspect4Restore() {
 		fi
 
 		MBR_FILE=$(ls -1 $RESTOREFILE/*.mbr)
-		if [[ -z $SF_FILE ]]; then
+		if [[ -z $MBR_FILE ]]; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_FILE_NOT_FOUND "$RESTOREFILE/*.mbr"
 			exitError $RC_MISSING_FILES
 		fi
@@ -4048,19 +4065,19 @@ function inspect4Restore() {
 
 	if (( PARTITIONBASED_BACKUP )); then
 		BLKID_FILE=$(ls -1 $RESTOREFILE/*.blkid)
-		if [[ -z $SF_FILE ]]; then
+		if [[ -z $BLKID_FILE ]]; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_FILE_NOT_FOUND "$RESTOREFILE/*.blkid"
 			exitError $RC_MISSING_FILES
 		fi
 
 		PARTED_FILE=$(ls -1 $RESTOREFILE/*.parted)
-		if [[ -z $SF_FILE ]]; then
+		if [[ -z $PARTED_FILE ]]; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_FILE_NOT_FOUND "$RESTOREFILE/*.parted"
 			exitError $RC_MISSING_FILES
 		fi
 
 		FDISK_FILE=$(ls -1 $RESTOREFILE/*.fdisk)
-		if [[ -z $SF_FILE ]]; then
+		if [[ -z $FDISK_FILE ]]; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_FILE_NOT_FOUND "$RESTOREFILE/*.fdisk"
 			exitError $RC_MISSING_FILES
 		fi
@@ -5943,4 +5960,4 @@ if (( $RESTORE_REMINDER )); then
 	writeToConsole $MSG_LEVEL_MINIMAL $MSG_RESTORE_REMINDER "$RESTORE_REMINDER_INTERVAL"
 fi
 
-doit #	no return for backup
+doit
